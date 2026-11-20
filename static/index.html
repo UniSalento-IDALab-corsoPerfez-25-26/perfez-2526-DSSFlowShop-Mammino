@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>DSS schedulazione flow shop</title>
+
+    <!-- ECharts: libreria dei grafici -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <!-- jQuery e Toastr: notifiche a comparsa -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+
+    <link rel="stylesheet" href="/static/css/dashboard.css"/>
+</head>
+<body>
+
+<div class="header">
+    <h2>Decision Support System — Schedulazione FlowShop</h2>
+    <div class="controls">
+        <a class="btn btn-secondary" href="/static/config.html" style="text-decoration:none; display:inline-block;">Configura</a>
+        <select id="sessionSelect">
+            <option value="">-- Carica una simulazione salvata --</option>
+        </select>
+        <button class="btn" onclick="loadSelectedSession()">Carica</button>
+        <button class="btn btn-danger" onclick="deleteSelectedSession()">Elimina</button>
+        <button class="btn" style="background-color: #28a745;" onclick="runOptimization()">Esegui nuova ottimizzazione</button>
+    </div>
+</div>
+
+<div id="spinnerOverlay">
+    <div class="spinner"></div>
+    <div style="font-size: 16px; font-weight: 600; color: #555;">Elaborazione in corso...</div>
+    <div style="font-size: 13px; color: #888; margin-top: 5px;">Attendere il completamento della simulazione e la costruzione dei grafici.</div>
+</div>
+
+<div id="noSolutionsMessage" class="card" style="display:none; padding: 20px; text-align:center; font-size: 16px; font-weight: 600; color: #555;">
+    Nessuna soluzione valida trovata entro i vincoli. Modifica i parametri e riprova.
+</div>
+
+<div id="baselineWarning" class="card" style="display:none; padding: 14px 20px; font-size: 14px; font-weight: 600; color: #856404; background: #fff3cd; border: 1px solid #ffeeba;">
+</div>
+
+<!-- Configurazione usata per la sessione caricata -->
+<div class="card" id="configCard" style="display:none;">
+    <div class="card-header" onclick="togglePanel('configBody', 'configToggle')">
+        <h3>Configurazione usata</h3>
+        <span id="configToggle" class="toggle-icon">▲</span>
+    </div>
+    <div id="configBody" class="card-body" style="display:none;">
+        <div class="chart-header">
+            <span id="configNota" style="font-size: 13px; color: #666;"></span>
+            <div class="chart-actions">
+                <button class="btn btn-secondary" id="configScarica" onclick="scaricaConfigUsata()">Scarica config JSON</button>
+            </div>
+        </div>
+        <table class="data-table" id="configTable">
+            <thead>
+                <tr>
+                    <th>Parametro</th>
+                    <th>Valore</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Dati dei prodotti schedulati -->
+<div class="card" id="dataCard" style="display:none;">
+    <div class="card-header" onclick="togglePanel('dataBody', 'dataToggle')">
+        <h3>Dati dei prodotti schedulati</h3>
+        <span id="dataToggle" class="toggle-icon">▲</span>
+    </div>
+    <div id="dataBody" class="card-body" style="display:none;">
+        <div class="chart-header">
+            <span style="font-size: 13px; color: #666;">Fasi di lavorazione della baseline e della soluzione scelta sulla frontiera.</span>
+            <div class="chart-actions">
+                <button class="btn btn-secondary" onclick="exportDatiCSV()">Esporta CSV dati</button>
+            </div>
+        </div>
+        <div class="data-grid">
+            <div class="data-table-wrap">
+                <p class="data-subtitle">Produzioni da schedulare e routing</p>
+                <table class="data-table" id="prodottiTable">
+                    <thead>
+                        <tr>
+                            <th>Prodotto</th>
+                            <th>Quantità</th>
+                            <th>Routing</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="data-table-wrap">
+                <p class="data-subtitle">Fasi per prodotto: baseline / soluzione scelta</p>
+                <table class="data-table" id="fasiTable">
+                    <thead>
+                        <tr>
+                            <th>Prodotto</th>
+                            <th>Baseline</th>
+                            <th>Soluzione scelta</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Affidabilità dei modelli: validazione di XGBoost -->
+<div class="card" id="affidabilitaCard" style="display:none;">
+    <div class="card-header" onclick="togglePanel('affidabilitaBody', 'affidabilitaToggle')">
+        <h3>Affidabilità dei modelli di previsione (XGBoost)</h3>
+        <span id="affidabilitaToggle" class="toggle-icon">▲</span>
+    </div>
+    <div id="affidabilitaBody" class="card-body" style="display:none;">
+        <div id="affidabilitaVuoto" style="display:none; font-size:14px; color:#555;">
+            Questa simulazione è stata salvata prima dell'introduzione della validazione dei modelli,
+            quindi non contiene i dati di affidabilità. Esegui una nuova ottimizzazione per vederli.
+        </div>
+        <div id="affidabilitaContenuto" style="display:none;">
+            <div id="affidabilitaBanner" class="note-banner"></div>
+
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-title">Errore medio durata</div>
+                    <div class="metric-value" id="mAffDurata">-</div>
+                    <div class="metric-sub" id="sAffDurata">-</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Errore medio potenza</div>
+                    <div class="metric-value" id="mAffPotenza">-</div>
+                    <div class="metric-sub" id="sAffPotenza">-</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">XGBoost vs modello semplice</div>
+                    <div class="metric-value" id="mAffVantaggio">-</div>
+                    <div class="metric-delta" id="dAffVantaggio">-</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Sovra-adattamento</div>
+                    <div class="metric-value" id="mAffOverfit">-</div>
+                    <div class="metric-delta" id="dAffOverfit">-</div>
+                </div>
+            </div>
+
+            <div class="chart-header">
+                <h4 style="margin:0;">Errore dei modelli sull'esame (% del valore medio: più basso = meglio)</h4>
+                <div class="chart-actions">
+                    <button class="btn btn-secondary" onclick="exportAffidabilitaCSV()">Esporta CSV dati</button>
+                </div>
+            </div>
+            <div id="affidabilitaChart" class="chart-container" style="height: 320px;"></div>
+
+            <div class="data-table-wrap" style="margin-top: 16px;">
+                <table class="data-table" id="affidabilitaTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Modello</th>
+                            <th colspan="3">Durata</th>
+                            <th colspan="3">Potenza</th>
+                        </tr>
+                        <tr>
+                            <th>MAE (h)</th>
+                            <th>MAE %</th>
+                            <th>R²</th>
+                            <th>MAE (kW)</th>
+                            <th>MAE %</th>
+                            <th>R²</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <ul class="spiegazione-list" id="affidabilitaSpiegazione"></ul>
+        </div>
+    </div>
+</div>
+
+<!-- Convergenza di NSGA-II e confronto con la ricerca casuale -->
+<div class="card" id="convergenzaCard" style="display:none;">
+    <div class="card-header" onclick="togglePanel('convergenzaBody', 'convergenzaToggle')">
+        <h3>Convergenza dell'ottimizzatore (NSGA-II) e confronto con ricerca casuale</h3>
+        <span id="convergenzaToggle" class="toggle-icon">▲</span>
+    </div>
+    <div id="convergenzaBody" class="card-body" style="display:none;">
+        <div id="convergenzaVuoto" style="display:none; font-size:14px; color:#555;"></div>
+        <div id="convergenzaContenuto" style="display:none;">
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-title">Esito</div>
+                    <div class="metric-value" id="mConvEsito">-</div>
+                    <div class="metric-sub" id="sConvEsito">-</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Miglioramento finale</div>
+                    <div class="metric-value" id="mConvMiglioramento">-</div>
+                    <div class="metric-sub" id="sConvMiglioramento">-</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">95% raggiunto alla</div>
+                    <div class="metric-value" id="mConvGen95">-</div>
+                    <div class="metric-sub">generazione</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Ricerca casuale</div>
+                    <div class="metric-value" id="mConvCaso">-</div>
+                    <div class="metric-sub" id="sConvCaso">-</div>
+                </div>
+            </div>
+
+            <div class="chart-header">
+                <h4 style="margin:0;">Ipervolume per schedulazioni provate (100% = risultato finale di NSGA-II)</h4>
+                <div class="chart-actions">
+                    <button class="btn btn-secondary" onclick="exportConvergenzaCSV()">Esporta CSV dati</button>
+                </div>
+            </div>
+            <div id="convergenzaChart" class="chart-container" style="height: 340px;"></div>
+
+            <ul class="spiegazione-list" id="convergenzaSpiegazione"></ul>
+        </div>
+    </div>
+</div>
+
+<!-- Frontiera di Pareto: le soluzioni proposte all'operatore -->
+<div class="card" id="paretoPanel" style="display: none;">
+    <div class="card-header" onclick="togglePanel('paretoBody', 'paretoToggle')">
+        <h3>Frontiera di Pareto (NSGA-II)</h3>
+        <span id="paretoToggle" class="toggle-icon">▼</span>
+    </div>
+    <div id="paretoBody" class="card-body">
+        <!-- Tempi di calcolo (nascosti per le sessioni che non li contengono) -->
+        <div id="tempiCalcolo" style="display:none; font-size: 13px; color: #444; margin-bottom: 8px;"></div>
+        <div class="chart-header">
+            <span style="font-size: 13px; color: #666;">Fai clic su un punto della frontiera per caricare il dettaglio del diagramma di Gantt e del profilo energetico.</span>
+            <div class="chart-actions">
+                <button class="btn btn-secondary" onclick="exportParetoCSV()">Esporta CSV Pareto</button>
+            </div>
+        </div>
+        <div id="paretoChart" class="chart-container"></div>
+    </div>
+</div>
+
+<!-- Soluzione scelta: Gantt, indicatori e profilo energetico -->
+<div class="card" id="detailsCard" style="display:none;">
+    <div class="card-header" onclick="togglePanel('detailsBody', 'detailsToggle')">
+        <h3>Diagramma di Gantt e profilo energetico 24 h</h3>
+        <span id="detailsToggle" class="toggle-icon">▼</span>
+    </div>
+    <div id="detailsBody" class="card-body">
+
+        <div class="chart-header">
+            <h4 style="margin:0;">Confronto delle schedulazioni per macchina (sopra: baseline · sotto: ottimizzata)</h4>
+            <div class="chart-actions">
+                <button class="btn btn-secondary" onclick="exportGanttCSV()">Esporta CSV Gantt</button>
+            </div>
+        </div>
+
+        <div class="legend-bar">
+            <div class="legend-item">
+                <div class="legend-box" style="background:#ffc107;"></div>
+                Setup
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background:#dc3545;"></div>
+                Attesa / Pausa
+            </div>
+        </div>
+
+        <div id="ganttChart" class="chart-container" style="height: 550px;"></div>
+
+        <!-- Indicatori della soluzione scelta rispetto alla baseline -->
+        <div class="card" id="metricsCard" style="display:none;">
+            <div class="card-body">
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-title">Costo energetico</div>
+                        <div class="metric-value" id="mCosto">-</div>
+                        <div class="metric-delta" id="dCosto">-</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Consumo totale</div>
+                        <div class="metric-value" id="mKwh">-</div>
+                        <div class="metric-delta" id="dKwh">-</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Throughput medio</div>
+                        <div class="metric-value" id="mTp">-</div>
+                        <div class="metric-delta" id="dTp">-</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-title">Makespan totale</div>
+                        <div class="metric-value" id="mMakespan">-</div>
+                        <div class="metric-delta" id="dMakespan">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-header" style="margin-top: 35px;">
+            <div>
+                <h4 style="margin:0;">Profilo energetico 24 h e prezzi dell'energia (MGP)</h4>
+                <div id="fontePrezziDashboard" style="font-size: 12px; color: #6c757d; margin-top: 4px;"></div>
+                <div id="potenzaFermaDashboard" style="font-size: 12px; color: #6c757d; margin-top: 2px;"></div>
+            </div>
+            <div class="chart-actions">
+                <button class="btn btn-secondary" onclick="exportEnergyCSV()">Esporta CSV Energia</button>
+            </div>
+        </div>
+        <div id="energyChart" class="chart-container"></div>
+    </div>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

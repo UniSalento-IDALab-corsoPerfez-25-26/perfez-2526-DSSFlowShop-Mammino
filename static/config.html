@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Configurazione del DSS</title>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+    <link rel="stylesheet" href="/static/css/config.css"/>
+</head>
+<body>
+    <div class="header">
+        <h2>Configurazione parametri</h2>
+        <div class="actions">
+            <button class="btn" id="saveBtn">Salva</button>
+            <button class="btn btn-secondary" id="reloadBtn">Ricarica</button>
+            <a class="btn btn-secondary" href="/" style="text-decoration:none; display:inline-block;">Dashboard</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Parametri generali</h3>
+        <div class="row">
+            <div><label>Seed (vuoto = casuale)</label><input id="NP_SEED" type="number"></div>
+            <div><label>Alfa: throughput minimo (frazione della baseline)</label><input id="alfa_input" type="number" step="0.01" min="0" max="1"></div>
+            <div>
+                <label>Origine dei dati storici</label>
+                <select id="sorgente_dati">
+                    <option value="simulato">simulato</option>
+                    <option value="reale">reale</option>
+                </select>
+            </div>
+            <div>
+                <label>Potenza a macchina ferma (% della potenza media in lavorazione)</label>
+                <input id="potenza_ferma_pct" type="number" step="1" min="0" max="100">
+            </div>
+        </div>
+        <p class="nota">Una macchina accesa ma ferma (setup, pause, attese) assorbe comunque energia:
+            in letteratura circa un terzo della potenza in lavorazione. 0 = macchina ferma senza consumi.</p>
+    </div>
+
+    <!-- Parametri dell'ottimizzatore NSGA-II -->
+    <div class="card">
+        <h3>Ottimizzatore NSGA-II</h3>
+        <p class="nota">Schedulazioni provate = popolazione × generazioni. Se la scheda "Convergenza" dice "Ancora in crescita", aumentare le generazioni. Il tempo di calcolo cresce in proporzione.</p>
+        <div class="row">
+            <div><label>Popolazione</label><input id="nsga2_pop_size" type="number" min="10" step="1"></div>
+            <div><label>Generazioni</label><input id="nsga2_n_gen" type="number" min="1" step="1"></div>
+            <div>
+                <label>Controllo di convergenza e ricerca casuale</label>
+                <input id="analisi_convergenza" type="checkbox"> <span style="font-size:13px;">attivo (raddoppia circa il tempo)</span>
+            </div>
+        </div>
+        <div class="nota" id="totaleProve"></div>
+    </div>
+
+    <div class="card">
+        <h3>Dataset storico</h3>
+        <div class="row">
+            <div><label>Numero di record</label><input id="n_samples" type="number"></div>
+            <div><label>Quantità min (m²)</label><input id="qmin" type="number" step="0.1"></div>
+            <div><label>Quantità max (m²)</label><input id="qmax" type="number" step="0.1"></div>
+            <div><label>Velocità min (m²/h)</label><input id="vmin" type="number" step="0.1"></div>
+            <div><label>Velocità max (m²/h)</label><input id="vmax" type="number" step="0.1"></div>
+            <div><label>Setup min (minuti)</label><input id="smin" type="number" step="0.1"></div>
+            <div><label>Setup max (minuti)</label><input id="smax" type="number" step="0.1"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Ordini giornalieri</h3>
+        <div class="row">
+            <div><label>Numero di ordini</label><input id="ord_n" type="number"></div>
+            <div><label>Quantità min (m²)</label><input id="ord_qmin" type="number" step="0.1"></div>
+            <div><label>Quantità max (m²)</label><input id="ord_qmax" type="number" step="0.1"></div>
+        </div>
+        <!-- XGBoost non sa prevedere fuori dai valori visti in addestramento -->
+        <div class="avviso" id="avvisoIntervallo">
+            Attenzione: le quantità degli ordini escono dall'intervallo dello storico. XGBoost non sa prevedere oltre i valori che ha visto: allargare lo storico o restringere gli ordini.
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Prezzi dell'energia (mercato del giorno prima)</h3>
+        <!-- Download dei prezzi reali del mercato del giorno prima (Energy-Charts) -->
+        <p class="nota">
+            Prezzi reali del mercato del giorno prima per la zona scelta (fonte: Energy-Charts, Fraunhofer ISE).
+            Valori all'ingrosso in €/kWh, senza oneri e imposte. I prezzi di domani escono verso le 13 di oggi:
+            prima di allora si usano come stima quelli dell'ultimo giorno disponibile.
+        </p>
+        <div class="row">
+            <div>
+                <label>Giorno (gg/mm/aaaa)</label>
+                <!-- Campo di testo in formato italiano; il pulsante apre il calendario
+                     del browser (campo data nascosto) e riporta la scelta nel testo -->
+                <div style="display:flex; gap:6px; position:relative;">
+                    <input id="dataPrezzi" type="text" placeholder="gg/mm/aaaa" maxlength="10" inputmode="numeric">
+                    <button class="btn btn-secondary" id="calendarioBtn" type="button" title="Scegli dal calendario">📅</button>
+                    <input id="dataPrezziCalendario" type="date" tabindex="-1" aria-hidden="true"
+                           style="position:absolute; right:0; bottom:0; width:1px; height:1px; opacity:0; border:0; padding:0;">
+                </div>
+            </div>
+            <div>
+                <label>Zona</label>
+                <select id="zonaPrezzi">
+                    <option value="IT-North">Nord</option>
+                    <option value="IT-Centre-North">Centro-Nord</option>
+                    <option value="IT-Centre-South">Centro-Sud</option>
+                    <option value="IT-South" selected>Sud</option>
+                    <option value="IT-Calabria">Calabria</option>
+                    <option value="IT-Sicily">Sicilia</option>
+                    <option value="IT-Sardinia">Sardegna</option>
+                </select>
+            </div>
+            <div style="display:flex; align-items:flex-end;">
+                <button class="btn" id="scaricaPrezziBtn" type="button" style="width:100%;">Scarica prezzi del giorno</button>
+            </div>
+        </div>
+        <div class="nota" id="fontePrezzi"></div>
+        <label>24 prezzi orari (€/kWh), dalle 0:00 alle 23:00</label>
+        <textarea id="ipex"></textarea>
+    </div>
+
+    <script src="/static/js/config.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Librerie necessarie per avviare il DSS (installazione: pip install -r requirements.txt)
+# Per fissare le versioni esatte usate per l'esame: pip freeze > requirements.txt
+
+# Server web e API
+fastapi
+uvicorn
+
+# Calcolo numerico e dati
+numpy
+pandas
+scipy
+
+# Modelli di previsione (XGBoost) e validazione (split, metriche, modelli di confronto)
+xgboost
+scikit-learn
+
+# Ottimizzazione multi-obiettivo (NSGA-II)
+pymoo
+
